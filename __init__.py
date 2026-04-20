@@ -15,6 +15,25 @@ from typing import Any, List, Optional
 _SEARCH_SCRIPT = Path(__file__).parent / "search.py"
 
 
+def _load_plugin_env() -> None:
+    """Load the plugin's .env file into os.environ if keys aren't already set."""
+    plugin_env = Path(__file__).parent / ".env"
+    if not plugin_env.exists():
+        return
+    for line in plugin_env.read_text().splitlines():
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip()
+        if val and not val.startswith("***") and key not in os.environ:
+            os.environ[key] = val
+
+# Load plugin .env on import
+_load_plugin_env()
+
+
 def _run_search(
     query: str,
     provider: str = "auto",
