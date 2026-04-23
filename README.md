@@ -60,7 +60,7 @@ Finally restart Hermes (or `/restart` + `/reset` in gateway chats) and use `web_
 
 | Provider | Best for | Free tier |
 |----------|----------|-----------|
-| Brave | General-purpose web search, independent index, broad factual queries | Monthly credits |
+| Brave | General-purpose web search, independent index, broad factual queries | $5.00/mo in free credits |
 | Serper (Google) | News, shopping, facts, local queries | 2,500/mo |
 | Tavily | Research, deep content, academic | 1,000/mo |
 | Exa | Semantic discovery, "alternatives to X", arxiv | 1,000/mo |
@@ -80,7 +80,7 @@ Auto-routing scores providers based on query signals (keywords, intent, linguist
 ```bash
 # Required (at least one)
 SERPER_API_KEY=***        # https://serper.dev — 2,500 free/mo
-BRAVE_API_KEY=***         # https://brave.com/search/api/ — monthly credits
+BRAVE_API_KEY=***         # https://brave.com/search/api/ — $5.00/mo in free credits; you won't be charged
 TAVILY_API_KEY=***        # https://tavily.com — 1,000 free/mo
 EXA_API_KEY=***           # https://exa.ai — 1,000 free/mo
 
