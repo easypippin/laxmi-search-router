@@ -4,6 +4,19 @@ All notable changes to the Hermes web-search-plus plugin are documented here.
 
 ---
 
+## [1.3.1] — 2026-04-23
+
+### Fixed
+- Plugin `.env` file now loads on module import, ensuring API keys are available at tool registration time (thanks @josh-clarke, #1)
+- `plugin.yaml` metadata: corrected `requires_env` schema and Hermes repo link
+
+### Added
+- MIT license file
+- README: Quick Start section, routing transparency, adaptive fallback explanation
+- Docs: Hermes virtualenv setup clarification to prevent dependency-install-in-wrong-env footgun (thanks @Wysie, #3)
+
+---
+
 ## [1.3.0] — 2026-03-17
 
 ### Added

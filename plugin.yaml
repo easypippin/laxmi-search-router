@@ -1,5 +1,5 @@
 name: web-search-plus
-version: "1.3.0"
+version: "1.3.1"
 description: "Multi-provider web search with intelligent auto-routing (Serper, Tavily, Exa, Querit, Perplexity, SearXNG)"
 author: robbyczgw-cla
 requires_env: []
