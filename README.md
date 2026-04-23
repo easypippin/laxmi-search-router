@@ -12,6 +12,7 @@ Multi-provider web search with intelligent auto-routing for [Hermes Agent](https
 git clone https://github.com/robbyczgw-cla/hermes-web-search-plus.git ~/.hermes/plugins/web-search-plus
 cd ~/.hermes/hermes-agent
 source venv/bin/activate
+pip install requests
 cd ~/.hermes/plugins/web-search-plus
 cp .env.template .env          # fill in at least one provider key
 # Optional: pip install httpx  # only needed for Exa deep/deep-reasoning
@@ -129,7 +130,9 @@ web_search_plus(query="LoRA fine-tuning", include_domains=["arxiv.org"])
 ### CLI testing
 
 ```bash
-python3 ~/.hermes/plugins/web-search-plus/search.py \
+cd ~/.hermes/hermes-agent
+source venv/bin/activate
+python ~/.hermes/plugins/web-search-plus/search.py \
   --query "test query" --provider auto --max-results 5 --compact
 ```
 
