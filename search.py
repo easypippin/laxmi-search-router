@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Web Search Plus — Unified Multi-Provider Search with Intelligent Auto-Routing
-Supports: Serper (Google), Tavily (Research), Querit (Multilingual AI Search),
+Supports: Serper (Google), Brave Search, Tavily (Research), Querit (Multilingual AI Search),
 Exa (Neural), Perplexity (Direct Answers)
 
 Smart Routing uses multi-signal analysis:
@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
-from urllib.parse import quote, urlparse
+from urllib.parse import quote, urlencode, urlparse
 
 
 # =============================================================================
@@ -277,7 +277,7 @@ DEFAULT_CONFIG = {
     "auto_routing": {
         "enabled": True,
         "fallback_provider": "serper",
-        "provider_priority": ["tavily", "querit", "exa", "perplexity", "serper", "you", "searxng"],
+        "provider_priority": ["tavily", "querit", "exa", "perplexity", "brave", "serper", "you", "searxng"],
         "disabled_providers": [],
         "confidence_threshold": 0.3,  # Below this, note low confidence
     },
@@ -285,6 +285,11 @@ DEFAULT_CONFIG = {
         "country": "us",
         "language": "en",
         "type": "search"
+    },
+    "brave": {
+        "country": "US",
+        "search_lang": "en",
+        "safesearch": "moderate",
     },
     "tavily": {
         "depth": "basic",
@@ -364,6 +369,7 @@ def get_api_key(provider: str, config: Dict[str, Any] = None) -> Optional[str]:
         return os.environ.get("PERPLEXITY_API_KEY") or os.environ.get("KILOCODE_API_KEY")
     key_map = {
         "serper": "SERPER_API_KEY",
+        "brave": "BRAVE_API_KEY",
         "tavily": "TAVILY_API_KEY",
         "querit": "QUERIT_API_KEY",
         "exa": "EXA_API_KEY",
@@ -482,6 +488,7 @@ def validate_api_key(provider: str, config: Dict[str, Any] = None) -> str:
     if not key:
         env_var = {
             "serper": "SERPER_API_KEY",
+            "brave": "BRAVE_API_KEY",
             "tavily": "TAVILY_API_KEY",
             "querit": "QUERIT_API_KEY",
             "exa": "EXA_API_KEY",
@@ -491,6 +498,7 @@ def validate_api_key(provider: str, config: Dict[str, Any] = None) -> str:
         
         urls = {
             "serper": "https://serper.dev",
+            "brave": "https://brave.com/search/api/",
             "tavily": "https://tavily.com",
             "querit": "https://querit.ai",
             "exa": "https://exa.ai",
@@ -1170,6 +1178,7 @@ class QueryAnalyzer:
         # Map intents to providers with final scores
         provider_scores = {
             "serper": shopping_score + local_news_score + (recency_score * 0.35),
+            "brave": shopping_score + local_news_score + (recency_score * 0.35),
             "tavily": research_score + (complexity["complexity_score"] if not complexity["is_complex"] else 0) + (0.2 * recency_score),
             "querit": (research_score * 0.65) + (rag_score * 0.35) + (recency_score * 0.45),
             "exa": discovery_score + (1.0 if re.search(r"\b(similar|alternatives?|examples?)\b", query, re.IGNORECASE) else 0.0) + (exa_deep_score * 0.5) + (exa_deep_reasoning_score * 0.5),
@@ -1181,6 +1190,7 @@ class QueryAnalyzer:
         # Build match details per provider
         provider_matches = {
             "serper": shopping_matches + local_news_matches,
+            "brave": shopping_matches + local_news_matches,
             "tavily": research_matches,
             "querit": research_matches,
             "exa": discovery_matches + exa_deep_matches + exa_deep_reasoning_matches,
@@ -1232,18 +1242,12 @@ class QueryAnalyzer:
         max_score = max(available.values())
         total_score = sum(available.values()) or 1.0
         
-        # Handle ties using priority
-        priority = self.auto_config.get("provider_priority", ["tavily", "querit", "exa", "perplexity", "serper", "you", "searxng"])
+        # Handle ties using deterministic per-query distribution
+        priority = self.auto_config.get("provider_priority", ["tavily", "querit", "exa", "perplexity", "brave", "serper", "you", "searxng"])
         winners = [p for p, s in available.items() if s == max_score]
         
         if len(winners) > 1:
-            # Use priority to break tie
-            for p in priority:
-                if p in winners:
-                    winner = p
-                    break
-            else:
-                winner = winners[0]
+            winner = _choose_tie_winner(query, winners, priority)
         else:
             winner = winners[0]
         
@@ -1348,6 +1352,7 @@ def explain_routing(query: str, config: Dict[str, Any]) -> Dict[str, Any]:
         "top_signals": routing["top_signals"],
         "intent_breakdown": {
             "shopping_signals": len(analysis["provider_matches"]["serper"]),
+            "brave_signals": len(analysis["provider_matches"]["brave"]),
             "research_signals": len(analysis["provider_matches"]["tavily"]),
             "querit_signals": len(analysis["provider_matches"]["querit"]),
             "discovery_signals": len(analysis["provider_matches"]["exa"]),
@@ -1371,7 +1376,7 @@ def explain_routing(query: str, config: Dict[str, Any]) -> Dict[str, Any]:
             if matches
         },
         "available_providers": [
-            p for p in ["serper", "tavily", "querit", "exa", "perplexity", "you", "searxng"]
+            p for p in ["serper", "brave", "tavily", "querit", "exa", "perplexity", "you", "searxng"]
             if get_api_key(p, config) and p not in config.get("auto_routing", {}).get("disabled_providers", [])
         ]
     }
@@ -1499,6 +1504,22 @@ def deduplicate_results_across_providers(results_by_provider: List[Tuple[str, Di
                 return deduped, dedup_count
     return deduped, dedup_count
 
+def _choose_tie_winner(query: str, winners: List[str], priority: List[str]) -> str:
+    """Break score ties deterministically per query.
+
+    Uses a stable hash of the query to distribute ties across providers while
+    keeping the same query reproducible across runs.
+    """
+    ordered_winners = [p for p in priority if p in winners]
+    if not ordered_winners:
+        ordered_winners = sorted(winners)
+    if len(ordered_winners) == 1:
+        return ordered_winners[0]
+    digest = hashlib.sha256(f"{query}|{'|'.join(ordered_winners)}".encode("utf-8")).hexdigest()
+    idx = int(digest[:8], 16) % len(ordered_winners)
+    return ordered_winners[idx]
+
+
 # =============================================================================
 # HTTP Client
 # =============================================================================
@@ -1530,6 +1551,47 @@ def make_request(url: str, headers: dict, body: dict, timeout: int = 30) -> dict
             503: "Service unavailable. The search provider may be down."
         }
         
+        friendly_msg = error_messages.get(e.code, f"API error: {error_detail}")
+        raise ProviderRequestError(f"{friendly_msg} (HTTP {e.code})", status_code=e.code, transient=e.code in TRANSIENT_HTTP_CODES)
+    except URLError as e:
+        reason = str(getattr(e, "reason", e))
+        is_timeout = "timed out" in reason.lower()
+        raise ProviderRequestError(f"Network error: {reason}. Check your internet connection.", transient=is_timeout)
+    except IncompleteRead as e:
+        partial_len = len(getattr(e, "partial", b"") or b"")
+        raise ProviderRequestError(
+            f"Connection interrupted while reading response ({partial_len} bytes received). Please retry.",
+            transient=True,
+        )
+    except TimeoutError:
+        raise ProviderRequestError(f"Request timed out after {timeout}s. Try again or reduce max_results.", transient=True)
+
+
+def make_get_request(url: str, headers: dict, timeout: int = 30) -> dict:
+    """Make HTTP GET request and return JSON response."""
+    if "User-Agent" not in headers:
+        headers["User-Agent"] = "ClawdBot-WebSearchPlus/2.1"
+    req = Request(url, headers=headers, method="GET")
+
+    try:
+        with urlopen(req, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except HTTPError as e:
+        error_body = e.read().decode("utf-8") if e.fp else str(e)
+        try:
+            error_json = json.loads(error_body)
+            error_detail = error_json.get("error") or error_json.get("message") or error_body
+        except json.JSONDecodeError:
+            error_detail = error_body[:500]
+
+        error_messages = {
+            401: "Invalid or expired API key. Please check your credentials.",
+            403: "Access forbidden. Your API key may not have permission for this operation.",
+            429: "Rate limit exceeded. Please wait a moment and try again.",
+            500: "Server error. The search provider is experiencing issues.",
+            503: "Service unavailable. The search provider may be down."
+        }
+
         friendly_msg = error_messages.get(e.code, f"API error: {error_detail}")
         raise ProviderRequestError(f"{friendly_msg} (HTTP {e.code})", status_code=e.code, transient=e.code in TRANSIENT_HTTP_CODES)
     except URLError as e:
@@ -1629,6 +1691,83 @@ def search_serper(
         "answer": answer,
         "knowledge_graph": data.get("knowledgeGraph"),
         "related_searches": [r.get("query") for r in data.get("relatedSearches", [])]
+    }
+
+
+# =============================================================================
+# Brave Search
+# =============================================================================
+
+def search_brave(
+    query: str,
+    api_key: str,
+    max_results: int = 5,
+    country: str = "US",
+    language: str = "en",
+    time_range: Optional[str] = None,
+    safesearch: str = "moderate",
+) -> dict:
+    """Search using Brave Search API."""
+    freshness_map = {
+        "hour": "pd",
+        "day": "pd",
+        "week": "pw",
+        "month": "pm",
+        "year": "py",
+    }
+    params = {
+        "q": query,
+        "count": max_results,
+        "country": country.upper(),
+        "search_lang": language,
+        "safesearch": safesearch,
+        "spellcheck": 1,
+    }
+    if time_range and time_range in freshness_map:
+        params["freshness"] = freshness_map[time_range]
+
+    url = f"https://api.search.brave.com/res/v1/web/search?{urlencode(params)}"
+    headers = {
+        "X-Subscription-Token": api_key,
+        "Accept": "application/json",
+        "Accept-Encoding": "gzip",
+    }
+
+    data = make_get_request(url, headers)
+
+    web_results = (data.get("web") or {}).get("results", [])[:max_results]
+    results = []
+    for i, item in enumerate(web_results):
+        snippet_parts = []
+        description = item.get("description") or item.get("snippet") or ""
+        if description:
+            snippet_parts.append(description)
+        extra_snippets = item.get("extra_snippets") or []
+        if extra_snippets:
+            snippet_parts.extend(extra_snippets[:2])
+        results.append({
+            "title": item.get("title", ""),
+            "url": item.get("url", ""),
+            "snippet": " ... ".join(part for part in snippet_parts if part),
+            "score": round(1.0 - i * 0.1, 2),
+            "age": item.get("age"),
+        })
+
+    answer = ""
+    if data.get("summary"):
+        answer = data.get("summary", "")
+    elif data.get("infobox", {}).get("description"):
+        answer = data["infobox"]["description"]
+    elif results:
+        answer = results[0]["snippet"]
+
+    return {
+        "provider": "brave",
+        "query": query,
+        "results": results,
+        "images": [],
+        "answer": answer,
+        "mixed": data.get("mixed"),
     }
 
 
@@ -2423,7 +2562,7 @@ Full docs: See README.md and SKILL.md
     # Common arguments
     parser.add_argument(
         "--provider", "-p", 
-        choices=["serper", "tavily", "querit", "exa", "perplexity", "you", "searxng", "auto"],
+        choices=["serper", "brave", "tavily", "querit", "exa", "perplexity", "you", "searxng", "auto"],
         help="Search provider (auto=intelligent routing)"
     )
     parser.add_argument(
@@ -2663,7 +2802,7 @@ Full docs: See README.md and SKILL.md
     
     # Build provider fallback list
     auto_config = config.get("auto_routing", {})
-    provider_priority = auto_config.get("provider_priority", ["tavily", "querit", "exa", "perplexity", "serper", "you", "searxng"])
+    provider_priority = auto_config.get("provider_priority", ["tavily", "querit", "exa", "perplexity", "brave", "serper", "you", "searxng"])
     disabled_providers = auto_config.get("disabled_providers", [])
 
     # Start with the selected provider, then try others in priority order
@@ -2700,6 +2839,17 @@ Full docs: See README.md and SKILL.md
                 search_type=args.search_type,
                 time_range=args.time_range,
                 include_images=args.images,
+            )
+        elif prov == "brave":
+            brave_config = config.get("brave", {})
+            return search_brave(
+                query=args.query,
+                api_key=key,
+                max_results=args.max_results,
+                country=brave_config.get("country", args.country),
+                language=brave_config.get("search_lang", args.language),
+                time_range=args.time_range or args.freshness,
+                safesearch=brave_config.get("safesearch", "moderate"),
             )
         elif prov == "tavily":
             return search_tavily(
