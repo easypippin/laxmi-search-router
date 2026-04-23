@@ -4,6 +4,21 @@ All notable changes to the Hermes web-search-plus plugin are documented here.
 
 ---
 
+## [1.4.0] — 2026-04-23
+
+### Added
+- **Brave Search provider** — new independent search index with generous free tier (2000 queries/month). Huge thanks to **@Wysie** for the full implementation (#4). Reduces reliance on Serper/Tavily and adds a strong fallback when Google-backed providers rate-limit.
+- `BRAVE_API_KEY` env support + `.env.template` entry + README provider matrix update (also @Wysie)
+- `tests/test_tie_breaker.py` — unit coverage for the SHA-256 deterministic tie-breaker (`_choose_tie_winner`): single-winner passthrough, same-query stability, distribution fairness across 200 queries, fallback without priority list
+
+### Fixed
+- Hermes `main` branch compatibility: plugin now survives the updated toolset resolution in Hermes core (thanks again **@Wysie**, #4)
+
+### Contributors
+- **@Wysie** — Brave provider + Hermes main compat (PR #4). Second merged PR from Wysie after the virtualenv docs fix in 1.3.1. Top external contributor 🏆
+
+---
+
 ## [1.3.1] — 2026-04-23
 
 ### Fixed
