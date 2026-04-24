@@ -1,5 +1,5 @@
 """
-web-search-plus — Hermes Plugin v1.3.0
+web-search-plus — Hermes Plugin v1.5.0
 Multi-provider web search with intelligent auto-routing.
 Ported from robbyczgw-cla/web-search-plus-plugin (OpenClaw) to Hermes Plugin API.
 """

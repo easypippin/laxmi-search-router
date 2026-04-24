@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.5.0] - 2026-04-24
+
+### Added
+- **Linkup provider** — source-grounded search with citations and fact-check signals. New regex dict `LINKUP_SOURCE_SIGNALS` (6 groups), bearer auth, parses both sourced-answer and standard search results.
+- **Firecrawl provider** — web search with scrape-ready structured content. Scoring: `discovery_score + research_score * 0.35 + recency_score * 0.25`.
+- Helper `load-env-file` supports plugin-local and legacy parent `.env` paths.
+
+### Changed
+- Provider priority order: tavily → linkup → querit → exa → firecrawl → perplexity → brave → serper → you → searxng.
+
+### Credits
+- Thanks @wysiecla for the contribution!
+
 All notable changes to the Hermes web-search-plus plugin are documented here.
 
 ---
