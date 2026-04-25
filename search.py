@@ -2176,6 +2176,304 @@ def search_firecrawl(
 
 
 # =============================================================================
+# Extract Plus (URL Content Extraction)
+# =============================================================================
+
+def _normalize_extract_result(
+    provider: str,
+    url: str,
+    title: str = "",
+    content: str = "",
+    raw_content: Optional[str] = None,
+    **extra: Any,
+) -> Dict[str, Any]:
+    result = {
+        "url": url,
+        "title": title or _title_from_url(url),
+        "content": content or "",
+        "raw_content": raw_content if raw_content is not None else (content or ""),
+        "provider": provider,
+    }
+    for key, value in extra.items():
+        if value is not None:
+            result[key] = value
+    return result
+
+
+def extract_firecrawl(
+    urls: List[str],
+    api_key: str,
+    output_format: str = "markdown",
+    include_images: bool = False,
+    include_raw_html: bool = False,
+    render_js: bool = False,
+    api_url: str = "https://api.firecrawl.dev/v2/scrape",
+    timeout: int = 60,
+) -> dict:
+    """Extract URL content using Firecrawl scrape."""
+    formats = ["markdown"] if output_format != "html" else ["html"]
+    if include_raw_html and "html" not in formats:
+        formats.append("html")
+
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    results: List[Dict[str, Any]] = []
+    for url in urls:
+        body: Dict[str, Any] = {"url": url, "formats": formats}
+        if render_js:
+            body["waitFor"] = 1000
+        data = make_request(api_url, headers, body, timeout=timeout)
+        if data.get("success") is False:
+            results.append(_normalize_extract_result("firecrawl", url, error=data.get("error") or data.get("warning") or "Firecrawl scrape failed"))
+            continue
+        payload = data.get("data") if isinstance(data.get("data"), dict) else data
+        metadata = payload.get("metadata") or {}
+        final_url = metadata.get("sourceURL") or metadata.get("url") or url
+        title = metadata.get("title") or ""
+        markdown = payload.get("markdown") or ""
+        html = payload.get("html") or payload.get("rawHtml") or ""
+        content = html if output_format == "html" else markdown or html
+        images = None
+        if include_images:
+            md_images = []
+            seen_image_urls = set()
+            for alt, image_url in re.findall(r"!\[([^\]]*)\]\(([^)]+)\)", markdown):
+                if image_url not in seen_image_urls:
+                    md_images.append({"alt": alt, "url": image_url})
+                    seen_image_urls.add(image_url)
+            og_image = metadata.get("ogImage") or metadata.get("og:image")
+            if og_image and og_image not in seen_image_urls:
+                md_images.insert(0, {"alt": "og:image", "url": og_image})
+            images = md_images or None
+        results.append(_normalize_extract_result(
+            "firecrawl",
+            final_url,
+            title=title,
+            content=content,
+            raw_content=content,
+            raw_html=html if html else None,
+            images=images,
+            metadata=metadata,
+        ))
+    return {"provider": "firecrawl", "results": results}
+
+
+def extract_linkup(
+    urls: List[str],
+    api_key: str,
+    output_format: str = "markdown",
+    include_images: bool = False,
+    include_raw_html: bool = False,
+    render_js: bool = False,
+    api_url: str = "https://api.linkup.so/v1/fetch",
+    timeout: int = 30,
+) -> dict:
+    """Extract URL content using Linkup fetch."""
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    results: List[Dict[str, Any]] = []
+    for url in urls:
+        body = {
+            "url": url,
+            "extractImages": include_images,
+            "includeRawHtml": include_raw_html or output_format == "html",
+            "renderJs": render_js,
+        }
+        data = make_request(api_url, headers, body, timeout=timeout)
+        if data.get("error"):
+            results.append(_normalize_extract_result("linkup", url, error=str(data.get("error"))))
+            continue
+        markdown = data.get("markdown") or ""
+        raw_html = data.get("rawHtml") or data.get("raw_html") or ""
+        content = raw_html if output_format == "html" else markdown or raw_html
+        results.append(_normalize_extract_result(
+            "linkup",
+            url,
+            content=content,
+            raw_content=content,
+            raw_html=raw_html if raw_html else None,
+            images=data.get("images") if include_images else None,
+        ))
+    return {"provider": "linkup", "results": results}
+
+
+def extract_tavily(
+    urls: List[str],
+    api_key: str,
+    output_format: str = "markdown",
+    include_images: bool = False,
+    include_raw_html: bool = False,
+    render_js: bool = False,
+    api_url: str = "https://api.tavily.com/extract",
+    timeout: int = 30,
+) -> dict:
+    """Extract URL content using Tavily extract."""
+    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    body = {"urls": urls, "include_images": include_images}
+    data = make_request(api_url, headers, body, timeout=timeout)
+    results: List[Dict[str, Any]] = []
+    for item in data.get("results", []):
+        url = item.get("url", "")
+        content = item.get("raw_content") or item.get("content") or ""
+        results.append(_normalize_extract_result(
+            "tavily",
+            url,
+            title=item.get("title", ""),
+            content=content,
+            raw_content=content,
+            images=item.get("images") if include_images else None,
+        ))
+    for failed in data.get("failed_results", []) or []:
+        failed_url = failed.get("url", "")
+        results.append(_normalize_extract_result("tavily", failed_url, error=failed.get("error") or "Tavily extract failed"))
+    return {"provider": "tavily", "results": results}
+
+
+def extract_exa(
+    urls: List[str],
+    api_key: str,
+    output_format: str = "markdown",
+    include_images: bool = False,
+    include_raw_html: bool = False,
+    render_js: bool = False,
+    api_url: str = "https://api.exa.ai/contents",
+    timeout: int = 30,
+) -> dict:
+    """Extract URL content using Exa Contents API."""
+    headers = {"x-api-key": api_key, "Content-Type": "application/json"}
+    body: Dict[str, Any] = {"urls": urls, "text": True}
+    data = make_request(api_url, headers, body, timeout=timeout)
+    results: List[Dict[str, Any]] = []
+    for item in data.get("results", []):
+        url = item.get("url") or item.get("id") or ""
+        content = item.get("text") or item.get("summary") or ""
+        results.append(_normalize_extract_result(
+            "exa",
+            url,
+            title=item.get("title", ""),
+            content=content,
+            raw_content=content,
+            summary=item.get("summary"),
+            highlights=item.get("highlights"),
+            published_date=item.get("publishedDate"),
+            author=item.get("author"),
+            image=item.get("image") if include_images else None,
+            favicon=item.get("favicon"),
+        ))
+    return {
+        "provider": "exa",
+        "results": results,
+        "request_id": data.get("requestId"),
+        "cost_dollars": data.get("costDollars"),
+        "statuses": data.get("statuses"),
+    }
+
+
+def extract_you(
+    urls: List[str],
+    api_key: str,
+    output_format: str = "markdown",
+    include_images: bool = False,
+    include_raw_html: bool = False,
+    render_js: bool = False,
+    api_url: str = "https://ydc-index.io/v1/contents",
+    timeout: int = 30,
+) -> dict:
+    """Extract URL content using You.com Contents API."""
+    formats = ["html" if output_format == "html" else "markdown"]
+    if include_raw_html and "html" not in formats:
+        formats.append("html")
+    if "metadata" not in formats:
+        formats.append("metadata")
+    headers = {"X-API-Key": api_key, "Content-Type": "application/json"}
+    body = {"urls": urls, "formats": formats, "crawl_timeout": max(1, min(timeout, 60))}
+    data = make_request(api_url, headers, body, timeout=timeout)
+    raw_items = data if isinstance(data, list) else data.get("results", []) or data.get("data", [])
+    results: List[Dict[str, Any]] = []
+    for item in raw_items:
+        url = item.get("url", "")
+        markdown = item.get("markdown") or ""
+        html = item.get("html") or ""
+        content = html if output_format == "html" else markdown or html
+        results.append(_normalize_extract_result(
+            "you",
+            url,
+            title=item.get("title", ""),
+            content=content,
+            raw_content=content,
+            raw_html=html if html else None,
+            metadata=item.get("metadata"),
+        ))
+    return {"provider": "you", "results": results}
+
+
+EXTRACT_PROVIDER_PRIORITY = ["firecrawl", "linkup", "tavily", "exa", "you"]
+
+
+def extract_plus(
+    urls: List[str],
+    provider: str = "auto",
+    output_format: str = "markdown",
+    include_images: bool = False,
+    include_raw_html: bool = False,
+    render_js: bool = False,
+    config: Optional[Dict[str, Any]] = None,
+) -> dict:
+    """Extract URL content with provider fallback."""
+    config = config or load_config()
+    selected = provider or "auto"
+    if not urls:
+        return {"provider": selected, "results": [], "error": "No URLs provided", "requested_provider": selected}
+    invalid = [u for u in urls if not (isinstance(u, str) and u.startswith(("http://", "https://")))]
+    if invalid:
+        return {
+            "provider": selected,
+            "results": [],
+            "error": f"Invalid URL(s) — must start with http:// or https://: {invalid}",
+            "requested_provider": selected,
+        }
+    providers = EXTRACT_PROVIDER_PRIORITY if selected == "auto" else [selected] + [p for p in EXTRACT_PROVIDER_PRIORITY if p != selected]
+    errors = []
+    for prov in providers:
+        if prov not in EXTRACT_PROVIDER_PRIORITY:
+            errors.append({"provider": prov, "error": f"Provider {prov} does not support extraction"})
+            continue
+        key = get_api_key(prov, config)
+        if not key:
+            errors.append({"provider": prov, "error": "missing_api_key"})
+            continue
+        try:
+            if prov == "firecrawl":
+                fc = config.get("firecrawl", {})
+                result = extract_firecrawl(urls, key, output_format, include_images, include_raw_html, render_js, api_url=fc.get("scrape_url", "https://api.firecrawl.dev/v2/scrape"), timeout=int(fc.get("extract_timeout", 60)))
+            elif prov == "linkup":
+                lu = config.get("linkup", {})
+                result = extract_linkup(urls, key, output_format, include_images, include_raw_html, render_js, api_url=lu.get("fetch_url", "https://api.linkup.so/v1/fetch"), timeout=int(lu.get("timeout", 30)))
+            elif prov == "tavily":
+                tv = config.get("tavily", {})
+                result = extract_tavily(urls, key, output_format, include_images, include_raw_html, render_js, api_url=tv.get("extract_url", "https://api.tavily.com/extract"), timeout=int(tv.get("timeout", 30)))
+            elif prov == "exa":
+                exa = config.get("exa", {})
+                result = extract_exa(urls, key, output_format, include_images, include_raw_html, render_js, api_url=exa.get("contents_url", "https://api.exa.ai/contents"), timeout=int(exa.get("timeout", 30)))
+            else:
+                you = config.get("you", {})
+                result = extract_you(urls, key, output_format, include_images, include_raw_html, render_js, api_url=you.get("contents_url", "https://ydc-index.io/v1/contents"), timeout=int(you.get("timeout", 30)))
+            res_list = result.get("results") or []
+            all_failed = bool(res_list) and all(r.get("error") for r in res_list)
+            if all_failed:
+                errors.append({
+                    "provider": prov,
+                    "error": "all_urls_failed",
+                    "details": [r.get("error") for r in res_list],
+                })
+                continue
+            result["routing"] = {"provider": prov, "requested_provider": selected, "fallback_used": bool(errors), "fallback_errors": errors}
+            return result
+        except Exception as e:
+            errors.append({"provider": prov, "error": str(e)})
+            continue
+    return {"provider": selected, "results": [], "error": "All extraction providers failed", "fallback_errors": errors}
+
+
+# =============================================================================
 # Exa (Neural/Semantic/Deep Search)
 # =============================================================================
 
@@ -2807,6 +3105,21 @@ Full docs: See README.md and SKILL.md
         help="Search query"
     )
     parser.add_argument(
+        "--extract-urls",
+        nargs="*",
+        help="Extract content from one or more URLs instead of running a search"
+    )
+    parser.add_argument(
+        "--format",
+        dest="output_format",
+        default="markdown",
+        choices=["markdown", "html"],
+        help="Extraction output format"
+    )
+    parser.add_argument("--extract-images", action="store_true", help="Extract image metadata when supported")
+    parser.add_argument("--include-raw-html", action="store_true", help="Include raw HTML when supported")
+    parser.add_argument("--render-js", action="store_true", help="Render JavaScript before extraction when supported")
+    parser.add_argument(
         "--max-results", "-n", 
         type=int, 
         default=config.get("defaults", {}).get("max_results", 5),
@@ -3024,6 +3337,20 @@ Full docs: See README.md and SKILL.md
     
     if args.cache_stats:
         result = cache_stats()
+        indent = None if args.compact else 2
+        print(json.dumps(result, indent=indent, ensure_ascii=False))
+        return
+
+    if args.extract_urls is not None:
+        result = extract_plus(
+            urls=args.extract_urls,
+            provider=args.provider or "auto",
+            output_format=args.output_format,
+            include_images=args.extract_images,
+            include_raw_html=args.include_raw_html,
+            render_js=args.render_js,
+            config=config,
+        )
         indent = None if args.compact else 2
         print(json.dumps(result, indent=indent, ensure_ascii=False))
         return

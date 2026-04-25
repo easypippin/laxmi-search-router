@@ -26,6 +26,13 @@ _PROVIDER_ENV_KEYS = [
     "YOU_API_KEY",
     "SEARXNG_INSTANCE_URL",
 ]
+_EXTRACT_PROVIDER_ENV_KEYS = [
+    "FIRECRAWL_API_KEY",
+    "LINKUP_API_KEY",
+    "TAVILY_API_KEY",
+    "EXA_API_KEY",
+    "YOU_API_KEY",
+]
 
 
 def _load_plugin_env() -> None:
@@ -99,6 +106,49 @@ def _run_search(
         return {"error": str(e), "provider": provider, "query": query, "results": []}
 
 
+def _run_extract(
+    urls: List[str],
+    provider: str = "auto",
+    output_format: str = "markdown",
+    include_images: bool = False,
+    include_raw_html: bool = False,
+    render_js: bool = False,
+) -> dict:
+    """Call search.py extract mode and return parsed JSON result."""
+    cmd = [
+        sys.executable,
+        str(_SEARCH_SCRIPT),
+        "--extract-urls",
+        *urls,
+        "--provider",
+        provider,
+        "--format",
+        output_format,
+        "--compact",
+    ]
+    if include_images:
+        cmd.append("--extract-images")
+    if include_raw_html:
+        cmd.append("--include-raw-html")
+    if render_js:
+        cmd.append("--render-js")
+
+    env = os.environ.copy()
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=90, env=env)
+        if result.returncode != 0:
+            stderr = result.stderr.strip()
+            try:
+                return json.loads(stderr)
+            except json.JSONDecodeError:
+                return {"error": stderr or "Extract failed", "provider": provider, "results": []}
+        return json.loads(result.stdout)
+    except subprocess.TimeoutExpired:
+        return {"error": "Extract timed out after 90s", "provider": provider, "results": []}
+    except Exception as e:
+        return {"error": str(e), "provider": provider, "results": []}
+
+
 def _format_results(data: dict) -> str:
     """Format search results for LLM consumption."""
     if "error" in data and not data.get("results"):
@@ -133,6 +183,26 @@ def _format_results(data: dict) -> str:
             lines.append(f"   {snippet}")
         lines.append("")
 
+    return "\n".join(lines).strip()
+
+
+def _format_extract_results(data: dict) -> str:
+    """Format extracted URL content for LLM consumption."""
+    if "error" in data and not data.get("results"):
+        return f"Extract error: {data['error']}"
+    provider = data.get("provider", "unknown")
+    lines = [f"[Provider: {provider}]"]
+    for i, r in enumerate(data.get("results", []), 1):
+        title = r.get("title") or "No title"
+        url = r.get("url", "")
+        content = r.get("content") or r.get("raw_content") or ""
+        lines.append(f"\n{i}. {title}")
+        if url:
+            lines.append(url)
+        if r.get("error"):
+            lines.append(f"Error: {r['error']}")
+        elif content:
+            lines.append(content)
     return "\n".join(lines).strip()
 
 
@@ -224,8 +294,12 @@ def register(ctx: Any) -> None:
         return _format_results(data)
 
     def check_fn() -> bool:
-        """Plugin is available if at least one provider credential is configured."""
+        """Search is available if at least one search provider credential is configured."""
         return any(os.environ.get(k) for k in _PROVIDER_ENV_KEYS)
+
+    def extract_check_fn() -> bool:
+        """Extraction is available if at least one extraction-capable provider credential is configured."""
+        return any(os.environ.get(k) for k in _EXTRACT_PROVIDER_ENV_KEYS)
 
     ctx.register_tool(
         name="web_search_plus",
@@ -236,4 +310,59 @@ def register(ctx: Any) -> None:
         requires_env=[],
         description="Multi-provider web search with intelligent auto-routing",
         emoji="🔍",
+    )
+
+    extract_schema = {
+        "name": "web_extract_plus",
+        "description": (
+            "Multi-provider URL content extraction. Use Firecrawl for robust scraping, "
+            "Linkup for clean markdown fetches with monthly free credits, Tavily for extraction, Exa Contents, or You.com Contents."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "urls": {"type": "array", "items": {"type": "string"}, "description": "URLs to extract"},
+                "provider": {"type": "string", "enum": ["auto", "firecrawl", "linkup", "tavily", "exa", "you"], "default": "auto"},
+                "format": {"type": "string", "enum": ["markdown", "html"], "default": "markdown"},
+                "include_images": {"type": "boolean", "default": False},
+                "include_raw_html": {"type": "boolean", "default": False},
+                "render_js": {"type": "boolean", "default": False},
+            },
+            "required": ["urls"],
+        },
+    }
+
+    def extract_handler(args_or_urls, provider: str = "auto", format: str = "markdown",
+                        include_images: bool = False, include_raw_html: bool = False,
+                        render_js: bool = False, **kwargs) -> str:
+        if isinstance(args_or_urls, dict):
+            urls = args_or_urls.get("urls", [])
+            provider = args_or_urls.get("provider", provider)
+            format = args_or_urls.get("format", format)
+            include_images = args_or_urls.get("include_images", include_images)
+            include_raw_html = args_or_urls.get("include_raw_html", include_raw_html)
+            render_js = args_or_urls.get("render_js", render_js)
+        else:
+            urls = args_or_urls
+        if isinstance(urls, str):
+            urls = [urls]
+        data = _run_extract(
+            urls=urls,
+            provider=provider,
+            output_format=format,
+            include_images=include_images,
+            include_raw_html=include_raw_html,
+            render_js=render_js,
+        )
+        return _format_extract_results(data)
+
+    ctx.register_tool(
+        name="web_extract_plus",
+        toolset=_TOOLSET_NAME,
+        schema=extract_schema,
+        handler=extract_handler,
+        check_fn=extract_check_fn,
+        requires_env=[],
+        description="Multi-provider URL extraction",
+        emoji="📄",
     )

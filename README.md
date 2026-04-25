@@ -40,7 +40,12 @@ tools:
     - web-search-plus
 ```
 
-Finally restart Hermes (or `/restart` + `/reset` in gateway chats) and use `web_search_plus`.
+Finally restart Hermes (or `/restart` + `/reset` in gateway chats) and use the plugin tools:
+
+- `web_search_plus` — multi-provider web search and auto-routing
+- `web_extract_plus` — provider-specific URL extraction via Firecrawl, Linkup, Tavily, Exa, or You.com
+
+Both tools are exposed by the `web-search-plus` toolset; enabling `web-search-plus` enables both.
 
 ---
 
@@ -52,6 +57,7 @@ Finally restart Hermes (or `/restart` + `/reset` in gateway chats) and use `web_
 - **Adaptive fallback** — automatically skips providers on cooldown (1h after failure)
 - **Routing transparency** — every response includes a `routing` object explaining provider choice
 - **Time & domain filtering** — `time_range`, `include_domains`, `exclude_domains`
+- **URL extraction** — `web_extract_plus` extracts clean content via Firecrawl, Linkup, Tavily, Exa, or You.com
 - **Local caching** — avoids duplicate API calls (1h TTL)
 
 ---
@@ -87,8 +93,10 @@ TAVILY_API_KEY=***        # https://tavily.com — 1,000 free/mo
 EXA_API_KEY=***           # https://exa.ai — 1,000 free/mo
 
 # Optional
-QUERIT_API_KEY=your-key        # https://querit.ai
-PERPLEXITY_API_KEY=your-key    # https://perplexity.ai/settings/api
+QUERIT_API_KEY=***        # https://querit.ai
+LINKUP_API_KEY=***        # https://linkup.so — source-backed search + fetch
+FIRECRAWL_API_KEY=***     # https://firecrawl.dev — search + scrape/extract
+PERPLEXITY_API_KEY=***    # https://perplexity.ai/settings/api
 KILOCODE_API_KEY=your-key      # Perplexity via Kilo Gateway fallback
 YOU_API_KEY=your-key           # https://api.you.com
 SEARXNG_INSTANCE_URL=https://your-instance.example.com
@@ -109,10 +117,25 @@ SEARXNG_INSTANCE_URL=https://your-instance.example.com
 | `depth` | string | `"normal"` | Exa only: `normal`, `deep`, `deep-reasoning` |
 | `count` | integer | `5` | Results (1–20) |
 | `time_range` | string | — | `day`, `week`, `month`, `year` |
-| `include_domains` | array | — | Whitelist: `["arxiv.org"]` |
-| `exclude_domains` | array | — | Blacklist: `["reddit.com"]` |
+| `include_domains` | string[] | — | Restrict search to domains |
+| `exclude_domains` | string[] | — | Exclude domains |
 
-### Examples
+### `web_extract_plus`
+
+Extract content from specific URLs using provider-specific extraction backends.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `urls` | string[] | **required** | URLs to extract |
+| `provider` | string | `"auto"` | Force: `firecrawl`, `linkup`, `tavily`, `exa`, `you` |
+| `format` | string | `"markdown"` | `markdown` or `html` |
+| `include_images` | boolean | `false` | Include image metadata when supported |
+| `include_raw_html` | boolean | `false` | Include raw HTML when supported |
+| `render_js` | boolean | `false` | Render JavaScript before extraction when supported |
+
+Auto extraction currently tries Firecrawl, then Linkup, Tavily, Exa, and You.com when keys are available.
+
+Examples:
 
 ```python
 web_search_plus(query="Graz weather today")
@@ -135,6 +158,12 @@ web_search_plus(query="YC startups web scraping", provider="firecrawl")
 
 web_search_plus(query="find credible sources and citations for AI tutoring outcomes", provider="linkup")
 # → Linkup source-grounded retrieval
+
+web_extract_plus(urls=["https://example.com"], provider="firecrawl")
+# → Extract clean markdown from a URL
+
+web_extract_plus(urls=["https://docs.linkup.so"], provider="linkup", render_js=False)
+# → Linkup fetch endpoint
 
 web_search_plus(query="LoRA fine-tuning", include_domains=["arxiv.org"])
 # → arxiv only
