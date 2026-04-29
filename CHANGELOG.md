@@ -1,5 +1,20 @@
 # Changelog
 
+## [v1.6.1] — 2026-04-29
+
+### 🔧 Improved
+- **Shared retry path for provider execution** — extraction now uses the same transient-error retry behavior as search, reducing duplicated logic and making retry handling more predictable across providers.
+- **Cooldown-aware extraction fallback** — `web_extract_plus` now skips providers already in cooldown and records those skips in routing metadata for clearer diagnostics.
+- **Provider health reset on successful fallback** — successful extraction fallbacks now clear health state for the provider that ultimately succeeds.
+
+### 🐛 Fixed
+- Extraction fallback now records provider failure cooldown metadata when a provider exhausts retries and fails.
+- Transient extraction failures (for example HTTP 503 / temporary upstream outages) now retry before failing over to the next provider.
+
+### 🧪 Tests
+- Added extraction tests for transient retry behavior, cooldown skipping, and provider health reset after fallback success.
+- Test suite remains green: 35/35 unit tests passing.
+
 ## [v1.6.0] — 2026-04-25
 
 ### ✨ Added
